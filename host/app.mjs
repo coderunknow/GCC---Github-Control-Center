@@ -101,7 +101,7 @@ function publicRequest(record) {
   };
 }
 
-function renderPage() {
+function renderPage(openMode = false) {
   return `<!DOCTYPE html>
 <html lang="vi"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -142,7 +142,9 @@ input[type=password]{width:100%;background:var(--bg);color:var(--text);border:1p
 .badge.active{color:#7ee787;border-color:rgba(63,185,80,.5)}
 .badge.recover_required{color:#ffb3ae;border-color:rgba(248,81,73,.5)}
 .badge.idle{color:#8b98a8}
+.openbar{background:repeating-linear-gradient(135deg,#7a1f1a,#7a1f1a 12px,#8c2620 12px,#8c2620 24px);color:#ffe3e0;font-size:12.5px;line-height:1.5;padding:9px 18px;border-bottom:1px solid #b3312a;text-align:center}
 </style></head><body>
+${openMode ? '<div class="openbar" role="alert"><strong>CHẾ ĐỘ TEST — ĐÃ TẮT MẬT KHẨU.</strong> Ai có đường dẫn này đều gửi được yêu cầu tới phiên Agent. Bỏ biến <span class="mono">AUTH_DISABLED</span> và khởi động lại để bật lại đăng nhập.</div>' : ''}
 <header>
   <div class="brand"><span class="mark"></span> Arena Host · phiên Agent đang chạy</div>
   <div style="display:flex;gap:10px;align-items:center">
@@ -265,7 +267,10 @@ export function createHost({ store, config, throttle = new LoginThrottle(), log 
     const method = req.method ?? 'GET';
 
     const cookies = parseCookies(req.headers.cookie);
-    const isHuman = verifySessionToken(cookies[SESSION_COOKIE], config.secret);
+    // Explicit opt-in only: config.authDisabled must be exactly true, which the
+    // server sets from AUTH_DISABLED=1. Everything else keeps the original
+    // fail-closed behaviour, including the worker token check below.
+    const isHuman = config.authDisabled === true || verifySessionToken(cookies[SESSION_COOKIE], config.secret);
     const isWorker = agentTokenMatches(req.headers['x-agent-token'], config.agentToken);
 
     const requireHuman = () => {
@@ -284,7 +289,7 @@ export function createHost({ store, config, throttle = new LoginThrottle(), log 
           'X-Frame-Options': 'DENY',
           'Referrer-Policy': 'no-referrer',
         });
-        res.end(renderPage());
+        res.end(renderPage(config.authDisabled === true));
         return;
       }
 
