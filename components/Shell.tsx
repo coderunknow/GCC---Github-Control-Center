@@ -1,34 +1,75 @@
 import Link from 'next/link';
 
-const NAV = [
+export const NAV = [
   { href: '/', label: 'Tổng quan' },
-  { href: '/health', label: 'Tình trạng tích hợp' },
+  { href: '/repos', label: 'Kho mã' },
+  { href: '/issues', label: 'Issues' },
+  { href: '/pulls', label: 'Pull requests' },
+  { href: '/actions', label: 'CI/CD' },
+  { href: '/releases', label: 'Releases' },
+  { href: '/activity', label: 'Hoạt động' },
+  { href: '/search', label: 'Tìm kiếm' },
+  { href: '/notifications', label: 'Thông báo' },
+  { href: '/reports', label: 'Báo cáo' },
+  { href: '/health', label: 'Tình trạng' },
 ];
 
-export function Shell({ children, active }: { children: React.ReactNode; active?: string }) {
+/** Marks the active nav item for a path, tolerating nested detail routes. */
+function isActive(href: string, active?: string): boolean {
+  if (!active) return false;
+  if (href === '/') return active === '/';
+  return active === href || active.startsWith(`${href}/`);
+}
+
+export function Shell({
+  children,
+  active,
+  viewer,
+  databaseAvailable,
+}: {
+  children: React.ReactNode;
+  active?: string;
+  viewer?: { login: string; avatarUrl: string } | null;
+  databaseAvailable?: boolean;
+}) {
   return (
     <>
+      <a className="skip-link" href="#main">
+        Bỏ qua điều hướng
+      </a>
       <header className="topbar">
         <div className="brand">
           <span className="mark" aria-hidden="true" />
           <span>Trung tâm điều khiển GitHub</span>
         </div>
-        <nav className="nav" aria-label="Điều hướng chính">
-          {NAV.map((item) => (
-            <Link key={item.href} href={item.href} aria-current={active === item.href ? 'page' : undefined}>
-              {item.label}
+        <div className="topbar-right">
+          {databaseAvailable === false ? (
+            <Link href="/health" className="topbar-status warn" title="Lịch sử bền vững đang tắt">
+              DB: chưa cấu hình
             </Link>
-          ))}
+          ) : null}
+          {viewer ? <span className="viewer">@{viewer.login}</span> : null}
           <form action="/api/logout" method="post">
-            <button type="submit" className="btn" style={{ background: 'transparent', color: 'var(--muted)', border: '1px solid var(--line)', fontWeight: 500 }}>
+            <button type="submit" className="btn-subtle">
               Đăng xuất
             </button>
           </form>
-        </nav>
+        </div>
       </header>
-      <main>{children}</main>
+      <nav className="nav" aria-label="Điều hướng chính">
+        {NAV.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-current={isActive(item.href, active) ? 'page' : undefined}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+      <main id="main">{children}</main>
       <footer className="foot">
-        Ứng dụng riêng tư, một người dùng. Số liệu lấy trực tiếp từ GitHub tại thời điểm tải trang.
+        Dữ liệu lấy trực tiếp từ GitHub mỗi lần tải trang. Không có số liệu mẫu.
       </footer>
     </>
   );

@@ -119,6 +119,7 @@ create table if not exists reports (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
   created_by   text not null,
+  kind         text not null default 'unknown',   -- which dataset (repos, issues, …)
   format       text not null check (format in ('csv', 'json', 'markdown')),
   range_from   timestamptz,
   range_to     timestamptz,
@@ -128,6 +129,11 @@ create table if not exists reports (
   content      text not null,
   incomplete   text[] not null default '{}'
 );
+-- Forward migration for databases created before `kind` existed. `create table
+-- if not exists` does not add columns, so this is stated explicitly and is
+-- safe to re-run.
+alter table reports add column if not exists kind text not null default 'unknown';
+
 create index if not exists reports_created_idx on reports (created_at desc);
 
 -- Retention policy. Default: keep everything until the user deletes it.

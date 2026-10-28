@@ -6,6 +6,72 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this pr
 
 ---
 
+## [0.1.0-dev2] — 2026-10-28
+
+Second development prerelease. The dashboard becomes a usable product surface: every listed
+screen reads live GitHub data, and the numbers it shows are scoped, labelled and testable.
+**Not production-ready, not deployed, and no database is provisioned.**
+
+### Added
+
+- **Repository explorer** — `/repos` with search, visibility/language filters and four sort
+  orders over the fetched set; `/repos/[owner]/[repo]` with tabs for commits, issues, pull
+  requests, CI runs and releases. A deleted, renamed or invisible repository now returns a real
+  `404` instead of a `200` error page.
+- **Issue and pull request detail** — review decision, requested reviewers, review history,
+  commit list, changed files and check-runs, with the failing/pending counts stated. Comment
+  lists show the true total when truncated. All GitHub links come from the payload.
+- **CI/CD, releases and activity screens** — workflow runs with success/failure/rate summary,
+  releases including drafts and prereleases, and a cross-repository commit feed that names the
+  repositories it could not read instead of silently dropping them.
+- **Search and notifications** — GitHub search across issues, PRs and repositories, and unread
+  notifications grouped by reason. A missing `notifications` scope is reported as a permission
+  problem rather than as "no notifications".
+- **Exports** — CSV, JSON and Markdown for six datasets, with column whitelists so a raw
+  upstream payload cannot reach a file. CSV neutralises spreadsheet formula injection and
+  includes a UTF-8 BOM for Excel.
+- **Persistent history and audit** — a database-agnostic store, report history with SHA-256 of
+  the exact bytes downloaded, and an append-only audit entry per export. `/api/audit` returns
+  `503` with `available:false` when no database is configured, rather than an ambiguous empty
+  list.
+- **`npm run db:migrate`** — applies `db/schema.sql` without printing the connection string.
+- **`lib/http.ts`** — proxy-aware origin and Secure-cookie detection, so redirects behind a
+  proxy do not point at `0.0.0.0` and plain-HTTP local use still receives its session cookie.
+- **89 new tests** (total 150): transport error classification and pagination, secret scrubbing,
+  payload mapping, search scoping, CSV injection, export integrity, PGlite-backed store and
+  route tests, proxy/redirect behaviour, and structural boundary checks.
+
+### Fixed
+
+- **Dashboard counted all of GitHub.** An unscoped `/search/issues` query reported ~59 million
+  open issues as if they belonged to the account. Counts now come from per-repository GraphQL
+  aliases, and an unscoped search is refused rather than executed.
+- **`open_issues_count` includes pull requests**, so it was replaced as the source of the issue
+  figure; the fallback path is labelled as a combined estimate.
+- **Issue and PR links pointed at `api.github.com`.** GraphQL's `url` is the API URL; the web
+  URL is now derived from `resourcePath`, with tests asserting no API links are rendered.
+- **Every check-run was classified `UNKNOWN`.** The classifier compared REST's lowercase
+  `completed`/`success` against GraphQL-style uppercase enums.
+- **`/search` failed with HTTP 422** whenever "all" was selected, because `/search/issues`
+  rejects a query without `is:issue` or `is:pr`. The query is now split per type.
+- **The schema and the store had drifted** — `reports.kind` existed only in code. The column and
+  a forward migration were added; a PGlite test now applies `db/schema.sql` verbatim.
+- **Path segments `.` and `..` passed validation** as owner/repository names.
+- GraphQL "Could not resolve to …" is now classified as `not_found`, so missing issues and PRs
+  produce `404` rather than a generic error banner.
+- `/api/health` no longer reports the stale `arena_direct_connectivity` field; it reports
+  version and database backend instead.
+
+### Changed
+
+- `lib/github.ts` was rewritten around a classified `GitHubError` and a `scrubSecrets` pass;
+  `lib/queries.ts` is the single typed query layer used by every screen.
+- All screens are server components with GET-form filters; no GitHub data enters the client
+  bundle.
+- Package version `0.1.0-dev1` → `0.1.0-dev2`.
+
+---
+
 ## [0.1.0-dev1] — 2026-10-28
 
 First development prerelease. **Not production-ready.** It establishes a verified,

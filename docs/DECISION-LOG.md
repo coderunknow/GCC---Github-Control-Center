@@ -371,3 +371,89 @@ execution nor proves suspension. Confirming it would need a longer, instrumented
 execute deterministic code. It cannot start an Agent Mode turn or invoke the orchestrator, so
 it cannot deliver DEC-006's requirement regardless of liveness. The automation gap in §4 of
 `docs/ARENA_AGENT_CONNECTIVITY.md` stands independently of this observation.
+
+---
+
+## DEC-009 — Dashboard counts come from GraphQL aliases, not Search
+
+**Status: IMPLEMENTED** · **Date:** 2026-10-28 · **Version:** 0.1.0-dev2
+
+**Problem found during live testing.** The overview called `/search/issues` with
+`is:issue state:open` and no owner qualifier. GitHub searched all of GitHub and returned
+**59,107,643** open issues, which the dashboard displayed as the account's total. The same bug
+affected pull requests (**90,964,480**).
+
+**Options considered.**
+
+1. Sum `open_issues_count` from `/user/repos`. Rejected: GitHub includes pull requests in that
+   count, so the number would be wrong in a different, less visible way.
+2. Sum `open_issues_count` minus a pull-request count per repository. Rejected: requires two
+   requests per repository and still cannot exclude draft-only states reliably.
+3. One `/search/issues` request per repository. Rejected: GitHub's search limit is 30 requests
+   per minute; a 33-repository account would exhaust it on a single page load.
+4. **Chosen:** one GraphQL request using field aliases, asking `issues(states: OPEN)` and
+   `pullRequests(states: OPEN)` per repository, chunked at 40 repositories per request.
+
+**Result.** Exact per-repository totals in two requests for a 33-repository account. When an
+alias comes back `null` the UI says *"một số repo không trả lời"* instead of quietly summing a
+smaller set.
+
+**Consequence for search screens.** GitHub search cannot express "all repositories I can reach".
+A query with no `repo:`, `user:` or `org:` qualifier searches all of GitHub, so `buildIssueQuery`
+now scopes to `involves:<login>` when no repository is chosen and **throws** when there is no
+scope to apply. Screens state which scope is active.
+
+---
+
+## DEC-010 — Web URLs from `resourcePath`, never from GraphQL `url`
+
+**Status: IMPLEMENTED** · **Date:** 2026-10-28 · **Version:** 0.1.0-dev2
+
+GraphQL returns `url` for issues and pull requests as `https://api.github.com/repos/…` — an API
+endpoint, not a page a person can read. Tests caught this by asserting a real URL and receiving
+an API one.
+
+The specification forbids hand-assembling GitHub URLs, so the fix does not concatenate
+`owner/name/number`. Instead the query now also requests **`resourcePath`** — a payload field
+such as `/o/r/pull/42` — and the web URL is `https://github.com` + that path. The helper
+validates the path shape and rejects `..`, falling back to the API URL if it is unexpected.
+
+A test asserts the derived URL, and a live check greps the rendered detail pages for
+`api.github.com`: the count is zero.
+
+---
+
+## DEC-011 — Degrade honestly when `DATABASE_URL` is absent
+
+**Status: IMPLEMENTED** · **Date:** 2026-10-28 · **Version:** 0.1.0-dev2
+
+Two failure modes were rejected:
+
+- **Silent no-op.** Writing history to nowhere and returning success would let the user believe
+  a report was recorded.
+- **Hard dependency.** Refusing to render the dashboard without a database would make an
+  optional component mandatory.
+
+**Chosen behaviour.** `getStore()` returns an `UnavailableStore` whose reads return empty and
+whose writes **throw**. Exports still download, but set `x-export-recording:
+skipped:no-database`, so the omission is visible in the response itself. `/api/audit` returns
+`503` with `available:false` — an empty `200` would be indistinguishable from "nothing has
+happened yet". `/reports` and `/health` state that history is off.
+
+The same code path runs against PGlite in tests, so the SQL under test is the SQL that would run
+in production.
+
+---
+
+## DEC-012 — Drop `arena_direct_connectivity` from `/api/health`
+
+**Status: IMPLEMENTED** · **Date:** 2026-10-28 · **Version:** 0.1.0-dev2
+
+`/api/health` reported `arena_direct_connectivity: "blocked"` — a constant string, not a
+measurement. A health check that returns a hard-coded verdict invites the reader to treat it as
+evidence that a probe ran. The field was removed.
+
+The endpoint now reports only what it can determine without a network call: whether auth is
+configured, whether a GitHub token exists, the database backend, and the version. Liveness
+probes should be cheap and honest; the connectivity question is documented in
+`docs/ARENA_AGENT_CONNECTIVITY.md`, where its evidence lives.
