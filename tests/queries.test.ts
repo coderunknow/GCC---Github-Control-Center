@@ -121,9 +121,49 @@ describe('phạm vi tìm kiếm', () => {
     ]);
     const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as {
       query: string;
+      variables: Record<string, string>;
     };
     expect(body.query).toContain('issues(states: OPEN)');
     expect(body.query).toContain('pullRequests(states: OPEN)');
+    // Values travel as variables, never concatenated into the query text.
+    expect(body.query).not.toContain('"o"');
+    expect(body.variables).toEqual({ o0: 'o', n0: 'a', o1: 'o', n1: 'b' });
+  });
+});
+
+describe('đếm theo repo — an toàn và không bỏ sót', () => {
+  it('dùng biến GraphQL thay vì nội suy tên vào query', async () => {
+    const { fetchRepositoryCounts } = await import('@/lib/queries');
+    fetchMock.mockResolvedValue(json({ data: { r0: { nameWithOwner: 'o/r', issues: { totalCount: 1 }, pullRequests: { totalCount: 0 } } } }));
+    await fetchRepositoryCounts([{ owner: 'o', name: 'r' }]);
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as {
+      query: string;
+      variables: Record<string, string>;
+    };
+    expect(body.query).toContain('repository(owner: $o0, name: $n0)');
+    expect(body.variables).toEqual({ o0: 'o', n0: 'r' });
+  });
+
+  it('không loại bỏ repo tên "-" (trước đây gây ra số liệu một phần)', async () => {
+    const { fetchRepositoryCounts } = await import('@/lib/queries');
+    fetchMock.mockResolvedValue(
+      json({
+        data: {
+          r0: { nameWithOwner: 'o/-', issues: { totalCount: 0 }, pullRequests: { totalCount: 0 } },
+          r1: { nameWithOwner: 'o/normal', issues: { totalCount: 2 }, pullRequests: { totalCount: 1 } },
+        },
+      }),
+    );
+    const counts = await fetchRepositoryCounts([
+      { owner: 'o', name: '-' },
+      { owner: 'o', name: 'normal' },
+    ]);
+    expect(counts).toHaveLength(2);
+    expect(counts[0].fullName).toBe('o/-');
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as {
+      variables: Record<string, string>;
+    };
+    expect(body.variables.n0).toBe('-');
   });
 });
 

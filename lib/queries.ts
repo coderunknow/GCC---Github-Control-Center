@@ -320,28 +320,38 @@ export async function fetchRepositoryCounts(
   const CHUNK = 40;
   const results: RepositoryCounts[] = [];
 
-  for (let start = 0; start < repositories.length; start += CHUNK) {
-    const chunk = repositories.slice(start, start + CHUNK).filter(
-      (repo) => isValidSegment(repo.owner) && isValidSegment(repo.name),
-    );
-    if (chunk.length === 0) continue;
+  // Only empty values are dropped. Everything else is passed as a GraphQL
+  // *variable*, so no repository name is ever concatenated into query text and
+  // names like "-" are counted instead of silently excluded.
+  const usable = repositories.filter((repo) => Boolean(repo.owner) && Boolean(repo.name));
 
-    const fields = chunk
-      .map(
-        (repo, index) =>
-          `r${index}: repository(owner: "${repo.owner}", name: "${repo.name}") {
-             nameWithOwner
-             issues(states: OPEN) { totalCount }
-             pullRequests(states: OPEN) { totalCount }
-           }`,
-      )
-      .join('\n');
+  for (let start = 0; start < usable.length; start += CHUNK) {
+    const chunk = usable.slice(start, start + CHUNK);
+
+    const declared: string[] = [];
+    const fields: string[] = [];
+    const variables: Record<string, string> = {};
+
+    chunk.forEach((repo, index) => {
+      declared.push(`$o${index}: String!`, `$n${index}: String!`);
+      variables[`o${index}`] = repo.owner;
+      variables[`n${index}`] = repo.name;
+      fields.push(
+        `r${index}: repository(owner: $o${index}, name: $n${index}) {
+           nameWithOwner
+           issues(states: OPEN) { totalCount }
+           pullRequests(states: OPEN) { totalCount }
+         }`,
+      );
+    });
+
+    const query = `query Counts(${declared.join(', ')}) {\n${fields.join('\n')}\n}`;
 
     const data = await graphql<Record<string, {
       nameWithOwner: string;
       issues: { totalCount: number };
       pullRequests: { totalCount: number };
-    } | null>>(`query Counts { ${fields} }`);
+    } | null>>(query, variables);
 
     chunk.forEach((repo, index) => {
       const entry = data[`r${index}`];
