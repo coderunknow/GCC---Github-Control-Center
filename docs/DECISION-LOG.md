@@ -274,3 +274,100 @@ deployment, least privilege implies two separate credentials:
 Neither may be shipped to the browser. Whether the user can provision these is
 **unverified**; it depends on their GitHub account type and on wanting a public or
 private queue repository.
+
+---
+
+## DEC-006 — User decision: unattended processing is a hard requirement
+
+**Status: BLOCKED** · **Date:** 2026-10-28 · **Decided by user:** yes
+
+### The decision
+
+Asked whether human-activated drain is an acceptable deployment model for the site, the user
+selected **"It must be unattended"**: keep the queue and the infrastructure, but treat
+unattended processing as a hard requirement; document precisely what Arena would need to
+provide rather than fake it.
+
+### Consequence
+
+- The GitHub queue from DEC-004 is **not** accepted as satisfying the requirement. It stays as
+  an investigation artifact and as infrastructure, but it must not be presented as the agent
+  integration.
+- The Arena request feature in the application is **BLOCKED** and is rendered as blocked in the
+  UI, naming the missing capability.
+- No substitute agent, model API, or browser automation will be introduced to close the gap.
+
+### What Arena would need to provide (the exact missing capability)
+
+A supported way to **start an Agent Mode turn from an external event** — an inbound trigger,
+webhook, polled inbox, or session-scoped API — targeting a specific existing session, with an
+identity handle for that session and a documented delivery acknowledgement. Everything else is
+already feasible and was demonstrated: durable queue, connectors, persistence, identity, result
+retrieval. Only the trigger is missing.
+
+If Arena ships such a capability, the queue already in `poc/` becomes the delivery mechanism
+with no redesign; only the drain trigger changes.
+
+---
+
+## DEC-007 — Environment capabilities for hosting and persistence
+
+**Status: VERIFIED (measured) / USER DECISION REQUIRED (resource use)**
+
+Probed because §10 requires a real production deployment and §11 a persistent database, and
+both depend on what the account actually has.
+
+| Capability | Finding | Status |
+| --- | --- | --- |
+| Vercel account | Team "coderunknow's projects", plan **Hobby** (free). Connector can create projects, deploy file-based builds, set env vars, manage domains. | **VERIFIED** |
+| Vercel deployment protection | `ssoProtection: all_except_custom_domains` — deployments are protected unless served on a custom domain. Relevant to public access. | **VERIFIED** |
+| Supabase organization | One org, `akefxrfemfvxvetsmnuz` | **VERIFIED** |
+| Supabase projects | Two exist, both **INACTIVE (paused)**: `nryjatuhyqlhltftznhm` (ap-northeast-1) and `zpjytemhwprepninzlgc` (ap-southeast-1) | **VERIFIED** |
+| Sandbox → Supabase | **Unreachable.** `supabase.com` connection failed; the sandbox allowlist covers only GitHub and package registries. Therefore a locally-run app cannot exercise a Supabase database; only the deployed app can. | **VERIFIED** |
+| Sandbox → Vercel URL | **Unreachable** from bash for the same reason. Unauthenticated page fetches can still be made through the platform's own page-fetch tool, and build logs are available through the Vercel connector. | **VERIFIED** |
+| GitHub credential | GitHub App installation token. Contents, Actions runs, pulls, releases, rate_limit, and GraphQL all OK. Cannot comment on issues, close issues, or list installation repositories. Repository enumeration works via `/user/repos`. | **VERIFIED** |
+
+### Why this needs the user
+
+Restoring a paused Supabase project changes the user's infrastructure and may affect their plan
+or usage. Creating an additional project does the same. Neither is authorized yet, and §10
+forbids creating billable resources without approval.
+
+### Recommendation
+
+Neither existing project should be commandeered blindly: `zpjytemhwprepninzlgc` is named
+"my new game" and `nryjatuhyqlhltftznhm` is "coderunknow's Project", so repurposing either
+risks destroying unrelated work. The cleanest option is a **new dedicated free-tier project**
+for this application. Restoring an existing one is acceptable only if the user confirms it
+holds nothing they need. Either way the choice is the user's, because it touches their
+infrastructure.
+
+### Testing consequence, stated up front
+
+Because the sandbox cannot reach Supabase, database-backed paths cannot be verified locally.
+Verification will therefore rely on: unit tests against a local in-process database, plus
+post-deployment smoke tests of the real deployment through the platform page-fetch tool and the
+Vercel connector's build logs. Any path that cannot be exercised that way will be reported as
+**BLOCKED/UNTESTED**, never as passing.
+
+---
+
+## DEC-008 — Observation: sandbox liveness across turns
+
+**Status: UNVERIFIED** · **Date:** 2026-10-28
+
+To test whether background work could substitute for a missing trigger, a 10-second-interval
+heartbeat process was started in the sandbox and left running across turns.
+
+**Observed:** the process was still alive on the next turn, and its log spanned the idle gap
+(11:21:37Z → 11:33:45Z). But it produced only **12 entries in ~12 minutes**, far below the 72
+expected from a 10-second interval. That is consistent with the sandbox being suspended or
+heavily throttled between turns rather than running continuously.
+
+**What this does not establish:** either direction. It neither proves continuous background
+execution nor proves suspension. Confirming it would need a longer, instrumented run.
+
+**Why it does not change the verdict:** even a continuously running sandbox process could only
+execute deterministic code. It cannot start an Agent Mode turn or invoke the orchestrator, so
+it cannot deliver DEC-006's requirement regardless of liveness. The automation gap in §4 of
+`docs/ARENA_AGENT_CONNECTIVITY.md` stands independently of this observation.
