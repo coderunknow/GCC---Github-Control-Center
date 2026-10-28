@@ -140,3 +140,95 @@ describe('giá trị cờ không hợp lệ không được bật', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-request authorisation
+//
+// The console can be embedded in a preview iframe where third-party cookies are
+// blocked, so a session cookie alone is not a reliable way to prove a human is
+// present. A request may therefore carry the password itself; the result is
+// recorded on the request so an irreversible action can be gated on it.
+// ---------------------------------------------------------------------------
+
+describe('xác thực theo từng yêu cầu', () => {
+  async function submit(prompt: string, password?: string) {
+    const body: Record<string, string> = { prompt };
+    if (password !== undefined) body.password = password;
+    return fetch(`${base}/api/requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('chế độ mở, không mật khẩu → lưu nhưng đánh dấu chưa xác thực', async () => {
+    await boot(true);
+    const response = await submit('yêu cầu không kèm bằng chứng');
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { request: { verified: string | null } };
+    expect(body.request.verified).toBeNull();
+  });
+
+  it('chế độ mở, mật khẩu đúng → verified = password', async () => {
+    await boot(true);
+    const response = await submit('yêu cầu có mật khẩu', PASSWORD);
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { request: { verified: string | null } };
+    expect(body.request.verified).toBe('password');
+  });
+
+  it('mật khẩu sai → 401 và KHÔNG tạo yêu cầu nào', async () => {
+    await boot(true);
+    const response = await submit('yêu cầu với mật khẩu sai', 'sai-hoan-toan');
+    expect(response.status).toBe(401);
+    expect(store.all()).toHaveLength(0);
+  });
+
+  it('mật khẩu đúng đi kèm nội dung duyệt → chứng cứ để merge', async () => {
+    await boot(true);
+    const response = await submit('duyệt merge + tag release', PASSWORD);
+    const body = (await response.json()) as { request: { verified: string | null; prompt: string } };
+    expect(body.request.verified).toBe('password');
+    expect(body.request.prompt).toContain('duyệt merge');
+    const stored = store.get((body as unknown as { request: { id: string } }).request.id);
+    expect(stored?.approval).toMatchObject({ method: 'password' });
+  });
+
+  it('đăng nhập bằng cookie → verified = session (không cần gửi lại mật khẩu)', async () => {
+    await boot(false);
+    const login = await fetch(`${base}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: PASSWORD }),
+    });
+    expect(login.status).toBe(200);
+    const cookie = login.headers.get('set-cookie') ?? '';
+    expect(cookie).toContain('arena_host_session=');
+
+    const response = await fetch(`${base}/api/requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: cookie.split(';')[0] },
+      body: JSON.stringify({ prompt: 'yêu cầu qua phiên đăng nhập' }),
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { request: { verified: string | null } };
+    expect(body.request.verified).toBe('session');
+  });
+
+  it('chặn dò mật khẩu qua endpoint gửi yêu cầu', async () => {
+    await boot(true);
+    // The login throttle is shared, so repeated wrong passwords must stop
+    // working rather than allowing unlimited guesses.
+    let sawThrottle = false;
+    for (let i = 0; i < 12; i += 1) {
+      const response = await submit(`thử mật khẩu lần ${i}`, `sai-${i}`);
+      if (response.status === 429) {
+        sawThrottle = true;
+        break;
+      }
+      expect(response.status).toBe(401);
+    }
+    expect(sawThrottle).toBe(true);
+    expect(store.all()).toHaveLength(0);
+  });
+});

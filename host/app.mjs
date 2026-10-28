@@ -98,6 +98,7 @@ function publicRequest(record) {
     error: record.error,
     attempts: record.attempts,
     control: record.control,
+    verified: record.approval?.method ?? null,
   };
 }
 
@@ -159,6 +160,9 @@ ${openMode ? '<div class="openbar" role="alert"><strong>CHẾ ĐỘ TEST — Đ�
   <div class="panel" id="console" hidden>
     <form id="f">
       <textarea id="p" rows="4" required minlength="3" maxlength="8000" placeholder="Nhập yêu cầu… (gõ STOP để dừng vòng chờ)"></textarea>
+      <label for="ap" class="mono" style="font-size:12px;color:var(--muted);display:block;margin:8px 0 4px">Mật khẩu — chỉ cần khi bạn muốn yêu cầu này được đánh dấu “đã xác thực”</label>
+      <input id="ap" type="password" autocomplete="off" placeholder="để trống nếu chỉ test">
+      <p class="msg" id="vmsg" style="font-size:12px"></p>
       <div class="row">
         <button id="send" type="submit">Gửi yêu cầu</button>
         <button type="button" class="ghost" id="stop">Yêu cầu dừng</button>
@@ -206,6 +210,7 @@ async function refresh(){
   list.innerHTML=reqs.length?reqs.slice().reverse().map(x=>\`
     <div class="item"><div class="top">
       <span><span class="pill \${x.status}">\${LABEL[x.status]||x.status}</span>
+      \${x.verified?'<span class="pill completed">đã xác thực</span>':'<span class="pill failed">chưa xác thực</span>'}
       <span class="mono"> \${esc(x.id).slice(0,8)} · #\${x.seq}\${x.control?' · lệnh điều khiển':''}</span></span>
       <span class="mono">\${esc(when(x.createdAt))}</span></div>
       <p class="q">\${esc(x.prompt)}</p>
@@ -227,9 +232,16 @@ document.getElementById('f').addEventListener('submit',async ev=>{
   ev.preventDefault();
   const box=document.getElementById('p'),msg=document.getElementById('m'),btn=document.getElementById('send');
   const prompt=box.value.trim();if(!prompt)return;
+  const pwBox=document.getElementById('ap');
+  const payload={prompt};if(pwBox.value)payload.password=pwBox.value;
   btn.disabled=true;msg.className='msg';msg.textContent='đang gửi…';
-  const r=await api('/api/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})});
-  if(r.ok){msg.className='msg ok';msg.textContent='đã gửi · #'+r.data.request.seq;box.value='';await refresh()}
+  const r=await api('/api/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r.ok){
+    const v=r.data.request.verified;
+    msg.className='msg ok';
+    msg.textContent='đã gửi · #'+r.data.request.seq+(v?' · đã xác thực ('+v+')':' · CHƯA xác thực');
+    box.value='';pwBox.value='';await refresh();
+  }
   else{msg.className='msg err';msg.textContent=r.data.error||'lỗi'}
   btn.disabled=false;
 });
@@ -267,10 +279,11 @@ export function createHost({ store, config, throttle = new LoginThrottle(), log 
     const method = req.method ?? 'GET';
 
     const cookies = parseCookies(req.headers.cookie);
+    const sessionValid = verifySessionToken(cookies[SESSION_COOKIE], config.secret);
     // Explicit opt-in only: config.authDisabled must be exactly true, which the
     // server sets from AUTH_DISABLED=1. Everything else keeps the original
     // fail-closed behaviour, including the worker token check below.
-    const isHuman = config.authDisabled === true || verifySessionToken(cookies[SESSION_COOKIE], config.secret);
+    const isHuman = config.authDisabled === true || sessionValid;
     const isWorker = agentTokenMatches(req.headers['x-agent-token'], config.agentToken);
 
     const requireHuman = () => {
@@ -358,8 +371,31 @@ export function createHost({ store, config, throttle = new LoginThrottle(), log 
         const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
         if (prompt.length < MIN_PROMPT) throw new HttpError(400, `prompt quá ngắn (tối thiểu ${MIN_PROMPT} ký tự)`);
         if (prompt.length > MAX_PROMPT) throw new HttpError(400, `prompt quá dài (tối đa ${MAX_PROMPT} ký tự)`);
-        const record = store.create(prompt, 'web');
-        log(`NEW_REQUEST seq=${record.seq} id=${record.id}`);
+
+        // Authentication is recorded per request instead of relying on a
+        // session cookie alone. Cookies are frequently blocked when the console
+        // is displayed inside a preview iframe, which made login impossible even
+        // with the right password; a credential carried in the request body
+        // works in that situation. A request with no proof is stored and
+        // answered, but can never authorise an irreversible action.
+        let approval = null;
+        if (sessionValid) {
+          approval = { method: 'session', at: new Date().toISOString() };
+        } else if (typeof body.password === 'string' && body.password) {
+          const key = `approval:${req.socket.remoteAddress ?? 'unknown'}`;
+          const gate = throttle.check(key);
+          if (!gate.allowed) throw new HttpError(429, 'quá nhiều lần thử mật khẩu, thử lại sau');
+          if (passwordMatches(body.password, config.password)) {
+            throttle.reset(key);
+            approval = { method: 'password', at: new Date().toISOString() };
+          } else {
+            throttle.record(key);
+            throw new HttpError(401, 'mật khẩu không đúng — yêu cầu không được gửi');
+          }
+        }
+
+        const record = store.create(prompt, 'web', approval);
+        log(`NEW_REQUEST seq=${record.seq} id=${record.id} verified=${approval ? approval.method : 'none'}`);
         json(res, 201, { request: publicRequest(record) });
         return;
       }
