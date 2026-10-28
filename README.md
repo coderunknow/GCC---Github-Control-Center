@@ -201,6 +201,23 @@ A normal deployment does not need this.
 
 ---
 
+## Automation
+
+Two workflows live in `.github/workflows/`:
+
+| Workflow | Trigger | Does |
+| --- | --- | --- |
+| `CI` | every pull request, every push to `main` | typecheck, tests, production build |
+| `Nightly` | `cron '0 18 * * *'` (01:00 Asia/Bangkok) and manual dispatch | verifies `main`, reports outdated/vulnerable dependencies, then prepares an in-range dependency update as a pull request |
+
+**What the nightly job will not do:** it never commits to `main`, never force-pushes, never merges
+its own PR and never enables auto-merge. `npm update` only moves within the semver ranges already
+declared in `package.json` — a major upgrade stays a human decision. The full gate set runs on the
+update branch *before* the PR is opened, because a PR created with the default `GITHUB_TOKEN` does
+not trigger further workflows and therefore shows no check run.
+
+`tests/workflows.test.ts` reads the workflow files and fails if any of those guarantees is broken.
+
 ## Operations
 
 ```bash

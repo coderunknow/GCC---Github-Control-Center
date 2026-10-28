@@ -153,3 +153,16 @@ Each was found by a test or a live check, not by inspection:
 No merge, tag, GitHub Release, deployment, database provisioning, paid resource, or permission
 change was performed. Webhooks, Projects V2 views, and any claim of near-real-time behaviour
 remain unimplemented and are stated as such in `README.md`.
+
+### 2026-10-28 — nightly automation + release approval
+
+- Added `.github/workflows/nightly.yml`: nightly verification, dependency report, and an in-range
+  update offered as a pull request. No auto-merge, no push to `main`, no force-push; the full gate
+  set runs before the PR is opened so the result is known even though a `GITHUB_TOKEN`-created PR
+  shows no check run.
+- Added `tests/workflows.test.ts` (15 assertions) so those guarantees are enforced, not promised.
+- Verified locally: 14 embedded shell blocks pass `bash -n`; the outdated/audit JSON parsing was
+  exercised against valid, invalid and empty input; a real `npm update --save` produced lockfile
+  churn and was reverted before committing.
+- Merge and release were approved by the user in chat (an authenticated channel), not through the
+  unauthenticated console.

@@ -1,0 +1,221 @@
+name: Nightly
+
+# Nightly maintenance for the control center.
+#
+# Three things happen every night, in order of how much they can go wrong:
+#
+#   1. verify      — the same gates as CI, so a red main is noticed within a day
+#                    even when nobody pushed.
+#   2. report      — outdated and vulnerable dependencies, written to the run
+#                    summary and uploaded as an artifact. Report-only: an
+#                    advisory in a transitive dependency must not fail the night.
+#   3. auto-update — `npm update` inside the semver ranges already declared in
+#                    package.json, verified with the full gate set, then offered
+#                    as a pull request on a dated branch.
+#
+# What it deliberately does NOT do:
+#   * it never commits to main, never force-pushes, and never merges its own PR;
+#     the update is prepared automatically, approving it stays human;
+#   * it does not use third-party actions beyond the official checkout and
+#     setup-node, so the supply chain stays the same as CI.
+#
+# Caveat worth knowing: pull requests opened with the default GITHUB_TOKEN do
+# not trigger further workflows, so the nightly PR will not show a CI check run.
+# That is why the gates are executed *before* the PR is opened, and why the PR
+# body states which commands ran and what they returned.
+
+on:
+  schedule:
+    # 18:00 UTC = 01:00 Asia/Bangkok, i.e. overnight for the maintainer.
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      # The suite needs no secrets: the host supplies its own throwaway values.
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Write verdict
+        if: always()
+        run: |
+          {
+            echo "## Nightly verification"
+            echo ""
+            echo "- commit: \`$(git rev-parse --short HEAD)\`"
+            echo "- result: **${{ job.status }}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  report:
+    name: dependency report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Outdated packages
+        id: outdated
+        run: |
+          # npm exits non-zero when anything is outdated, and may emit warnings
+          # instead of JSON; neither may fail the night's report.
+          npm outdated --json > outdated.json 2>/dev/null || true
+          count=$(node -e '
+            const fs = require("fs");
+            let n = 0;
+            try {
+              const parsed = JSON.parse(fs.readFileSync("outdated.json", "utf8") || "{}");
+              n = Object.keys(parsed).length;
+            } catch {
+              n = 0;
+              fs.writeFileSync("outdated.json", "{}");
+            }
+            console.log(n);
+          ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Outdated: $count"
+
+      - name: Audit summary
+        run: |
+          npm audit --json > audit.json 2>/dev/null || true
+          node -e '
+            let a = {};
+            try { a = JSON.parse(require("fs").readFileSync("audit.json", "utf8")); } catch {}
+            const v = a.metadata?.vulnerabilities ?? {};
+            console.log(`Vulnerabilities — info ${v.info ?? 0}, low ${v.low ?? 0}, moderate ${v.moderate ?? 0}, high ${v.high ?? 0}, critical ${v.critical ?? 0}`);
+          ' >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Write summary
+        run: |
+          {
+            echo "## Dependency report"
+            echo ""
+            echo "- outdated packages: **${{ steps.outdated.outputs.count }}**"
+            echo ""
+            echo '```json'
+            head -c 4000 outdated.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-dependency-report
+          path: |
+            outdated.json
+            audit.json
+          retention-days: 14
+
+  auto-update:
+    name: prepare update PR
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Only patch/minor movement inside the ranges already in package.json.
+      # A major upgrade is a decision, not a chore, so it is left to a human.
+      - name: Apply in-range updates
+        id: bump
+        run: |
+          npm update --save
+          if git diff --quiet -- package.json package-lock.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Không có bản cập nhật nào trong phạm vi cho phép."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff --stat -- package.json package-lock.json
+          fi
+
+      - name: Verify the update
+        if: steps.bump.outputs.changed == 'true'
+        id: gates
+        run: |
+          npm run typecheck && npm test && npm run build
+          echo "gates=pass" >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request
+        if: steps.bump.outputs.changed == 'true' && steps.gates.outputs.gates == 'pass'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          day=$(date -u +%Y-%m-%d)
+          branch="nightly/deps-${day}"
+
+          # Never stack nightly PRs: check *before* pushing, so an open one from
+          # an earlier night is respected instead of producing a duplicate.
+          if gh pr list --state open --json headRefName --jq '.[].headRefName' | grep -q '^nightly/deps-'; then
+            echo "Đã có pull request nightly đang mở — không tạo thêm."
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$branch"
+          git add package.json package-lock.json
+          git commit -m "chore(deps): in-range updates ${day}"
+          git push origin "$branch"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore(deps): nightly in-range updates ${day}" \
+            --body "$(printf '%s\n' \
+              'Cập nhật tự động hằng đêm, **chỉ trong phạm vi version đã khai báo** trong `package.json`.' \
+              '' \
+              'Các cổng đã chạy trên chính branch này trước khi mở PR:' \
+              '' \
+              '- `npm run typecheck` — pass' \
+              '- `npm test` — pass' \
+              '- `npm run build` — pass' \
+              '' \
+              'PR này **không** tự merge. Kiểm tra rồi quyết định.' \
+              '' \
+              '_Lưu ý: PR do GITHUB_TOKEN tạo sẽ không kích hoạt workflow CI, nên sẽ không thấy check run. Đó là lý do các cổng được chạy trước khi tạo._')"
+
+      - name: Write verdict
+        if: always()
+        run: |
+          {
+            echo "## Nightly update"
+            echo ""
+            echo "- changes: ${{ steps.bump.outputs.changed == 'true' && 'yes' || 'no' }}"
+            echo "- gates: ${{ steps.gates.outputs.gates || 'not run' }}"
+          } >> "$GITHUB_STEP_SUMMARY"

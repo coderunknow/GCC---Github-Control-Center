@@ -62,6 +62,16 @@ screen reads live GitHub data, and the numbers it shows are scoped, labelled and
 - `/api/health` no longer reports the stale `arena_direct_connectivity` field; it reports
   version and database backend instead.
 
+### Added (automation)
+
+- **Nightly workflow** (`.github/workflows/nightly.yml`) at 01:00 Asia/Bangkok: re-verifies `main`
+  with the same three gates as CI, reports outdated and vulnerable dependencies to the run
+  summary and as an artifact, and prepares an in-range dependency update as a pull request.
+  It never pushes to `main`, never force-pushes and never merges — approval stays human.
+- **`tests/workflows.test.ts`** — 15 policy assertions over the workflow files: no auto-merge,
+  no force-push, no write to `main`, least-privilege permissions, gates executed before the PR is
+  opened, and no credential literals.
+
 ### Changed
 
 - `lib/github.ts` was rewritten around a classified `GitHubError` and a `scrubSecrets` pass;
