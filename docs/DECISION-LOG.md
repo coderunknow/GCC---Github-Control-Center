@@ -165,3 +165,112 @@ that the choice is visible rather than implicit.
 | 2026-10-28 | Enumerated `help.arena.ai` collections and articles | No developer/agent/session API documentation |
 | 2026-10-28 | Fetched Arena Terms of Use | §5(vi)/(vii) prohibit programmatic access and scraping |
 | 2026-10-28 | Fetched `https://docs.arena.ai/` | Does not resolve |
+
+---
+
+## DEC-004 — Durable queue consumed by the exact session (the user's fourth approach)
+
+**Status: VERIFIED** for the transport · **BLOCKED** for unattended consumption
+**Date:** 2026-10-28 · **Approved by user:** yes, as an investigation with a PoC if feasible
+
+### What was asked
+
+Build a durable request queue that the website writes to, which the *exact existing*
+Arena Agent Mode session consumes through a supported tool / connector / polling
+mechanism, using its own context. Verify it works without a model API, another agent,
+undocumented endpoints, or browser automation. Determine whether the same session can
+process requests while the user is away, the browser is closed, or the current task has
+finished. Build a PoC only if feasible, and prove end to end that a request submitted
+from the website was actually processed by the exact session.
+
+### What was built
+
+`poc/` — a zero-dependency Node server plus a session-side transport script. The queue
+is stored in GitHub Issues; answers are committed to `queue/results/<request_id>.json`.
+See `poc/README.md`.
+
+### Evidence: VERIFIED end to end
+
+| Step | Result |
+| --- | --- |
+| `POST /api/requests` from the website API | Issue [#1](https://github.com/coderunknow/Testing/issues/1) created, `request_id 3f57a364-15db-4374-a04f-c2b96bd73c37`, 11:19:27Z |
+| `node poc/drain.mjs list` in this session | Returned that request |
+| Session writes an answer | Contained facts only this session held: the sandbox TLS-intercept workaround, the transient list lag, measured network reach, branch and commit count |
+| `node poc/drain.mjs answer 1 …` | Wrote and pushed `queue/results/3f57a364-….json` |
+| `GET /api/requests` | Site returned the answer, `status: "answered"`, `answeredBy: "arena-agent-mode-session"` |
+
+Also verified independently: the GitHub dashboard view renders real account data
+(repositories, open PRs, open issues, recent commits).
+
+### Constraints discovered by measurement
+
+1. **Sandbox network allowlist.** `api.github.com` → 200; `example.com`, `supabase.com`,
+   `vercel.com` → connection failed. A queue on a general-purpose database is unreachable
+   from the consumer side, so GitHub is the only viable store for this design.
+2. **Credential is an App installation token.** Create/read issues ✅; comment and close
+   issues ❌ (`403 Resource not accessible by integration`); `git push` ✅. The answer
+   channel was therefore designed around a committed result file, with comments attempted
+   best-effort and reported honestly on failure rather than treated as success.
+3. **Transient read-after-write lag.** The first `drain.mjs list` seconds after issue
+   creation returned "No pending requests"; a retry returned it. Consumers must tolerate
+   this and must not treat an empty read as terminal.
+
+### The blocker: no supported trigger
+
+Arena documents no scheduler, webhook, cron, or polling mechanism that starts an Agent
+Mode turn without a user message. A turn begins with a human message and ends with the
+agent's reply ("When the task is complete, provide your feedback to continue"). The
+sandbox is long-lived *within* a turn; nothing documented lets it start the next one.
+
+Consequence, stated plainly: the queue is real and durable, and the exact session does
+consume it — **on its next activation by a human**, not while the user is away. Latency
+is unbounded. This is not equivalent to an API-backed service and must not be described
+as one.
+
+### Session-lifetime findings
+
+- Agent Mode is a long-running thread ("sometimes over hundreds of turns") with built-in
+  conversation compaction, so the same session can be reused for a long time. (VERIFIED,
+  Arena Help Center)
+- A session that hits its token limit can only continue in a **new** session, and no
+  context transfer exists between sessions. (VERIFIED)
+- Arena states the orchestrator model may be switched automatically mid-session to avoid
+  a broken state. Therefore "the exact agent" can only be guaranteed as the same
+  **thread**, not as the same underlying model. (VERIFIED, and material to the wording of
+  the original requirement)
+- A daily usage limit applies and resets after 24 hours. (VERIFIED)
+
+### Security, privacy, cost
+
+- The PoC has **no authentication**: anyone with the preview URL can submit and read.
+  This must be fixed before any real deployment.
+- The queue repository is **public**, so request text and answers are world-readable.
+- The token is server-side only and never reaches the browser; remote strings are escaped.
+- No model API, so no per-request inference cost. GitHub API use is free within rate
+  limits. The session's own usage counts against the user's Arena daily limit like any
+  other message.
+
+### Question this leaves open
+
+Human-activated drain is the only variant that could be verified. If the product
+requires unattended processing, that requirement remains **BLOCKED** and needs a
+supported trigger from Arena, or an explicit decision to accept a different mechanism
+(which would no longer be the same agent).
+
+---
+
+## DEC-005 — Credential scopes for a real deployment
+
+**Status: VERIFIED (measurement) / UNVERIFIED (the user's actual environment)**
+
+Measured capabilities of the sandbox credential are recorded in DEC-004. For a real
+deployment, least privilege implies two separate credentials:
+
+| Side | Needs |
+| --- | --- |
+| Website → queue | `issues: write` (create/read issues) on one repository |
+| Session → answers | `contents: write`, `issues: read` |
+
+Neither may be shipped to the browser. Whether the user can provision these is
+**unverified**; it depends on their GitHub account type and on wanting a public or
+private queue repository.

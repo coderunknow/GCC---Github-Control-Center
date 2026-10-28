@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arena Session Bridge</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="dot" aria-hidden="true"></span>
+    <strong>Arena Session Bridge</strong>
+    <span class="tag">proof of concept</span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-view="dashboard" role="tab">GitHub dashboard</button>
+    <button class="tab" data-view="bridge" role="tab">Session bridge</button>
+  </nav>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main>
+  <!-- ------------------------------------------------------------------ -->
+  <section id="view-dashboard" class="view is-active">
+    <div id="dash-status" class="muted">Loading GitHub data…</div>
+    <div id="dash-body" hidden>
+      <div class="cards">
+        <article class="card"><h3>Repositories</h3><div id="dash-repos" class="list"></div></article>
+        <article class="card"><h3>Open pull requests</h3><div id="dash-pulls" class="list"></div></article>
+        <article class="card"><h3>Open issues</h3><div id="dash-issues" class="list"></div></article>
+        <article class="card"><h3>Recent commits <span id="dash-repo" class="subtle"></span></h3><div id="dash-commits" class="list"></div></article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ -->
+  <section id="view-bridge" class="view">
+    <div class="split">
+      <div class="panel">
+        <h2>Submit a request</h2>
+        <p class="muted">
+          Writes a durable record to GitHub Issues. It is picked up by the exact
+          Arena Agent Mode session on its next activation — <strong>not</strong> by a
+          model API and <strong>not</strong> by browser automation.
+        </p>
+        <form id="request-form">
+          <label for="prompt">Request</label>
+          <textarea id="prompt" name="prompt" rows="5" placeholder="Describe what the session should do…" required minlength="3" maxlength="8000"></textarea>
+          <div class="row">
+            <button type="submit" id="submit-btn">Enqueue request</button>
+            <button type="button" id="refresh-btn" class="ghost">Refresh</button>
+          </div>
+          <p id="form-msg" class="msg" role="status"></p>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h2>Queue <span id="queue-repo" class="subtle"></span></h2>
+        <div id="fidelity" class="notice"></div>
+        <div id="requests" class="list"><span class="muted">Loading…</span></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  Queue: GitHub Issues · Consumer: this Arena Agent Mode session · No model API in the loop
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
