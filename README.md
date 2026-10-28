@@ -181,6 +181,11 @@ A normal deployment does not need this.
   `POST/PATCH/PUT/DELETE` exists outside the transport module.
 - **Limitation.** Sessions are stateless, so logout clears the cookie but cannot revoke an
   already-issued token; with a 12-hour TTL the exposure window is bounded.
+- **Manual-testing mode (`AUTH_DISABLED=1`).** Removes the login requirement so a temporary
+  host can be exercised without credentials. It is explicit, never inferred, reported by
+  `/api/health` as `auth_disabled: true`, and announced by a red banner on every screen.
+  `tests/middleware.test.ts` asserts that the default stays deny-by-default and that only the
+  exact value `1` enables it. Do not set it on a deployment that matters.
 
 ---
 

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { authDisabled } from '@/lib/auth';
 
 export const NAV = [
   { href: '/', label: 'Tổng quan' },
@@ -32,11 +33,20 @@ export function Shell({
   viewer?: { login: string; avatarUrl: string } | null;
   databaseAvailable?: boolean;
 }) {
+  const openMode = authDisabled();
+
   return (
     <>
       <a className="skip-link" href="#main">
         Bỏ qua điều hướng
       </a>
+      {openMode ? (
+        <div className="open-mode-banner" role="alert">
+          <strong>CHẾ ĐỘ TEST — ĐÃ TẮT MẬT KHẨU.</strong> Bất kỳ ai có đường dẫn này đều xem được dữ liệu GitHub của
+          tài khoản (chỉ đọc). Chỉ dùng cho host thử nghiệm tạm thời; bỏ biến môi trường{' '}
+          <span className="mono">AUTH_DISABLED</span> và khởi động lại để bật lại đăng nhập.
+        </div>
+      ) : null}
       <header className="topbar">
         <div className="brand">
           <span className="mark" aria-hidden="true" />

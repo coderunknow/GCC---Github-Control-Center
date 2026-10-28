@@ -1,14 +1,28 @@
 import { NextResponse } from 'next/server';
-import { SESSION_COOKIE, SESSION_MAX_AGE, createSessionToken, passwordMatches } from '@/lib/auth';
+import { SESSION_COOKIE, SESSION_MAX_AGE, authDisabled, createSessionToken, passwordMatches } from '@/lib/auth';
 import { absoluteUrl, isSecureRequest } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
-  const form = await request.formData();
+  const contentType = request.headers.get('content-type') ?? '(none)';
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    // A body that cannot be parsed is a client error, never a 500.
+    console.warn('[login] unparseable form body', { contentType });
+    return NextResponse.json({ error: 'invalid form body' }, { status: 400 });
+  }
+
   const password = String(form.get('password') ?? '');
   const nextRaw = String(form.get('next') ?? '/');
   const next = nextRaw.startsWith('/') && !nextRaw.startsWith('//') ? nextRaw : '/';
+
+  if (authDisabled()) {
+    // Manual-testing mode: no credential is checked and none is required.
+    return NextResponse.redirect(absoluteUrl(request, next), 303);
+  }
 
   if (!password || !passwordMatches(password)) {
     return NextResponse.redirect(

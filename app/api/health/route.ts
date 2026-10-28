@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { authConfigured } from '@/lib/auth';
+import { authConfigured, authDisabled } from '@/lib/auth';
 import { githubConfigured } from '@/lib/github';
 import { getStore } from '@/lib/db';
 
@@ -23,6 +23,9 @@ export async function GET() {
     time: new Date().toISOString(),
     checks: {
       auth_configured: authConfigured(),
+      // Reported so an operator can never mistake an open test host for a
+      // protected one by reading this endpoint.
+      auth_disabled: authDisabled(),
       github_configured: githubConfigured(),
       database_configured: store.available,
       database_backend: store.status.backend,

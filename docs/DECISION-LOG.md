@@ -457,3 +457,40 @@ The endpoint now reports only what it can determine without a network call: whet
 configured, whether a GitHub token exists, the database backend, and the version. Liveness
 probes should be cheap and honest; the connectivity question is documented in
 `docs/ARENA_AGENT_CONNECTIVITY.md`, where its evidence lives.
+
+---
+
+## DEC-013 — `AUTH_DISABLED` escape hatch for manual testing
+
+**Status: IMPLEMENTED** · **Date:** 2026-10-28 · **Version:** 0.1.0-dev2
+
+**Request.** The user asked to remove the password so the running test host could be exercised
+without friction, after a login attempt failed in the browser while the same credential
+succeeded server-side.
+
+**Options considered.**
+
+1. Delete the password check. Rejected: it makes an open instance indistinguishable from a
+   protected one and cannot be reverted without a code change.
+2. Lower the password to something trivial. Rejected: still produces the failure the user hit,
+   and leaves a weak credential that looks like security.
+3. **Chosen:** an explicit `AUTH_DISABLED=1` flag. Authentication code is untouched; the flag is
+   read in one place (`lib/auth.ts:authDisabled`) and honoured by the middleware and the login
+   route.
+
+**Guard rails, because a bypass flag is itself a risk.**
+
+- Only the exact string `1` enables it; `true`, `yes`, `0` and an empty value do not.
+- Every screen renders a red banner stating that the password is off and how to restore it.
+- `/api/health` reports `auth_disabled`, so an operator reading the probe cannot mistake an open
+  host for a protected one.
+- `tests/middleware.test.ts` locks both directions: the default remains deny-by-default with
+  `401` for APIs and a redirect elsewhere; the flag opens routes only when set explicitly.
+- `.env.example` marks it `DANGER`, and the README documents the blast radius: read-only screens
+  are readable by anyone with the URL; the GitHub token stays server-side and is never sent to
+  the browser.
+
+**Residual risk, stated plainly.** While the flag is set, the preview URL is effectively public
+read access to the account's GitHub data. Acceptable for a throwaway sandbox host verified to
+hold no private repositories; not acceptable for a deployment. The flag is not part of the
+product's normal configuration and is documented as test-only.

@@ -32,6 +32,17 @@ a:hover { text-decoration: underline; }
   border-radius: 4px;
 }
 
+.open-mode-banner {
+  background: repeating-linear-gradient(135deg, #7a1f1a, #7a1f1a 12px, #8c2620 12px, #8c2620 24px);
+  color: #ffe3e0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 9px 18px;
+  border-bottom: 1px solid #b3312a;
+  text-align: center;
+}
+.open-mode-banner .mono { color: #fff; }
+
 .skip-link {
   position: absolute;
   left: -9999px;
