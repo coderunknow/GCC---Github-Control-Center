@@ -32,7 +32,20 @@
 npm run typecheck
 npm test
 npm run build
+npm run db:migrate   # only when DATABASE_URL is set
 ```
+
+## Data-honesty rules (enforced by tests)
+
+- Never issue a GitHub search without a `repo:` or `involves:` scope. An unscoped
+  `/search/issues` counts all of GitHub, which once reported 59 million issues as the account's
+  total.
+- Never use `open_issues_count` as an issue total — GitHub includes pull requests in it.
+- Never build a GitHub web URL that did not come from the payload. For GraphQL, that means
+  `resourcePath`, not `url` (which is the API endpoint).
+- A page subtotal must be labelled as a subtotal, with its scope and fetch time.
+- "No permission" and "no data" are different outcomes and must render differently.
+- When no database is configured, say so; never return an empty list as if it were a result.
 
 ## Sandbox quirk
 

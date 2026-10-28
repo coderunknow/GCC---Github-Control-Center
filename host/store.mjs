@@ -96,7 +96,7 @@ export class Store {
    * @param {string} prompt
    * @param {string} source
    */
-  create(prompt, source = 'web') {
+  create(prompt, source = 'web', approval = null) {
     this.state.lastSeq += 1;
     const record = {
       id: randomUUID(),
@@ -114,6 +114,10 @@ export class Store {
       answeredBy: null,
       error: null,
       control: /^STOP$/i.test(prompt.trim()),
+      // Who proved they were authorised to submit this, if anyone.
+      // null means the request arrived through an unauthenticated channel and
+      // must never be read as approval for an irreversible action.
+      approval,
     };
     this.state.requests.push(record);
     this.#record('request.created', { id: record.id, seq: record.seq });

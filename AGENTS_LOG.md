@@ -87,3 +87,82 @@
 
 Automatic recovery is not implemented and is not claimed. A human-sent message is a manual
 recovery step, not automation, and is labelled as such everywhere it appears.
+
+---
+
+## 2026-10-28 — v0.1.0-dev2 (GitHub Project Control Center)
+
+### Scope decision
+
+The governing request was to build `v0.1.0-dev2` as a *working* control center — explicitly not
+a version bump, a cosmetic change, or placeholder pages. Priority order applied: original
+specification §1–16 and §17, then security/correctness/data constraints, then complete real
+user flows, then UX, then docs/version/CI.
+
+### Activities
+
+1. **Preflight.** Branch `arena/e9f2eef2-testing` from `origin/main` at `2c520c4`; tags:
+   `v0.1.0-dev1` only; working tree clean; baseline `tsc --noEmit` clean and **36/36** tests
+   passing.
+2. **Specification re-read.** §4 (repository coverage), §5.1–5.5 (dashboard), §6 (search,
+   notifications, reports) read verbatim from `google_drive/PROMPT 1`. §17 exists only in
+   conversation, not in the file — disclosed in the report.
+3. **Library layer.** Rewrote `lib/github.ts` (classified `GitHubError`, `rest`,
+   `restPaginated`, `graphql`, rate-limit buckets, `scrubSecrets`), added `lib/queries.ts`,
+   `lib/csv.ts`, `lib/format.ts`, `lib/exports.ts`, `lib/http.ts`, and `lib/db/*`.
+4. **Screens.** Built 21 routes: overview, repository explorer and detail tabs, issue and PR
+   list/detail, CI, releases, activity, search, notifications, reports, health, plus the export,
+   audit and health APIs.
+5. **Tests.** 150 total (was 36). New coverage: transport errors and pagination, secret
+   scrubbing, payload mapping, search scoping, CSV injection, export integrity, PGlite store and
+   route tests, proxy/redirect handling, structural boundary checks.
+6. **Live verification.** Production build served on `:3100` with a real GitHub token; every
+   screen returned `200` with live data; exports returned real files; `/api/audit` returned
+   `503` as designed without a database.
+
+### Defects found and fixed during this increment
+
+Each was found by a test or a live check, not by inspection:
+
+| # | Defect | Found by | Fix |
+| --- | --- | --- | --- |
+| 1 | Dashboard reported 59,107,643 open issues (all of GitHub) | Live page render | Scoped GraphQL aliases; unscoped search now refused |
+| 2 | `open_issues_count` includes PRs | Code review while writing the count test | Replaced as the issue source; fallback labelled |
+| 3 | Issue/PR links pointed at `api.github.com` | URL assertion test | `resourcePath`-derived web URLs |
+| 4 | Every check-run classified `UNKNOWN` | Mapping test | Case-normalised classifier |
+| 5 | `/search` returned HTTP 422 for "all" | Live page render | One scoped query per type |
+| 6 | `reports.kind` missing from the schema | PGlite integration test | Column plus forward migration |
+| 7 | `.` and `..` accepted as owner/repository | Export test | Explicit segment rejection |
+| 8 | Login redirect pointed at `0.0.0.0` behind a proxy | Live login with headers | Proxy-aware `publicOrigin` |
+| 9 | Missing PR returned 200 + error banner | Live 404 check | GraphQL "Could not resolve" → `not_found` → 404 |
+
+### Verification status
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | **PASS** |
+| `npm test` | **PASS** — 150/150, 10 files |
+| `npm run build` | **PASS** — 21 routes |
+| Live HTTP smoke (real GitHub) | **PASS** — 15 routes, `200`, no error banners except a genuine failing check |
+| CSV/JSON export, live | **PASS** — real rows, BOM present, `skipped:no-database` |
+| Database flows | **PASS against PGlite**; **UNTESTED against real Postgres** (none provisioned) |
+| Deployment | **NOT DONE** — prohibited this increment |
+
+### Not done
+
+No merge, tag, GitHub Release, deployment, database provisioning, paid resource, or permission
+change was performed. Webhooks, Projects V2 views, and any claim of near-real-time behaviour
+remain unimplemented and are stated as such in `README.md`.
+
+### 2026-10-28 — nightly automation + release approval
+
+- Added `.github/workflows/nightly.yml`: nightly verification, dependency report, and an in-range
+  update offered as a pull request. No auto-merge, no push to `main`, no force-push; the full gate
+  set runs before the PR is opened so the result is known even though a `GITHUB_TOKEN`-created PR
+  shows no check run.
+- Added `tests/workflows.test.ts` (15 assertions) so those guarantees are enforced, not promised.
+- Verified locally: 14 embedded shell blocks pass `bash -n`; the outdated/audit JSON parsing was
+  exercised against valid, invalid and empty input; a real `npm update --save` produced lockfile
+  churn and was reverted before committing.
+- Merge and release were approved by the user in chat (an authenticated channel), not through the
+  unauthenticated console.

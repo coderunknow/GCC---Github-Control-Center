@@ -94,3 +94,59 @@ faked if the platform does not support it.
 - **Host survival ≠ worker survival.** Demonstrated directly: the v1 host kept serving five
   requests across a turn boundary while the worker was absent. These must never be described
   with one word.
+
+---
+
+## v0.1.0-dev2 — design of the control center screens
+
+### What changed in intent
+
+dev1 delivered a verified foundation with three screens. dev2 had to make the product *usable*:
+real flows for repositories, issues, pull requests, CI, releases, activity, search,
+notifications and exports. That forced three design questions.
+
+### 1. Where does a number come from, and how is its scope shown?
+
+Every count on screen has a stated origin. `lib/queries.ts` returns `PageInfo { count, truncated,
+scope, fetchedAt }` alongside data, and pages render `scope` verbatim under the table. Where a
+scope cannot be computed honestly — "all repositories this token can reach" is not expressible
+in GitHub search — the page narrows the question (one repository, or issues involving you) and
+says which question it answered.
+
+Rejected: a single aggregate GraphQL query for the dashboard. It looks elegant and produces
+numbers whose coverage is invisible; the aliased-counter approach can state exactly which
+repositories answered.
+
+### 2. Server components everywhere, filters as GET forms
+
+No client-side data fetching means no token in the browser, no hydration of GitHub payloads, and
+a page that can be smoke-tested with `curl`. Filters, sorting and pagination are ordinary form
+submissions and links, which also makes every screen state a shareable URL. The cost is a full
+round trip per filter change — acceptable for a single-user tool read from GitHub on every load.
+
+### 3. Failure has more than one shape
+
+The interface distinguishes, in separate components:
+
+- **not configured** — no `GITHUB_TOKEN` at all; tells you what to set;
+- **not permitted** — 403; names the scope to add and links GitHub's documentation;
+- **not found** — 404; real status code and a page explaining rename/delete/private;
+- **rate limited** — shows when the quota resets;
+- **no data** — an empty repository, an empty search, a project with no releases;
+- **database off** — export works, history is off, and the export response says so.
+
+A single "something went wrong" box would collapse six different remedies into none.
+
+### 4. Read-only is a design constraint, not an omission
+
+No screen offers approve, merge, comment, re-run or create. The CI page says a green run is not
+merge readiness; the PR page shows GitHub's own `reviewDecision` and says the app draws no
+conclusion from one check. Every action link leads to GitHub, where the user's own permissions
+and audit trail apply.
+
+### 5. The database is optional by design
+
+`getStore()` returns either a Postgres-backed store or an `UnavailableStore` whose writes throw.
+Pages branch on `available`, not on a try/catch, so "history is off" is a normal state rather
+than an exception path. Because the same `SqlStore` runs against PGlite in tests, the SQL that
+is tested is the SQL that would run in production.

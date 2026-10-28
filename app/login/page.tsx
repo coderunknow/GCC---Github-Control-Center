@@ -1,4 +1,5 @@
-import { authConfigured } from '@/lib/auth';
+import Link from 'next/link';
+import { authConfigured, authDisabled } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,7 @@ export default async function LoginPage({
   const params = await searchParams;
   const next = typeof params.next === 'string' && params.next.startsWith('/') ? params.next : '/';
   const configured = authConfigured();
+  const openMode = authDisabled();
 
   return (
     <main className="login-wrap">
@@ -19,7 +21,12 @@ export default async function LoginPage({
           Ứng dụng riêng tư, chỉ một người dùng được phép truy cập.
         </p>
 
-        {!configured ? (
+        {openMode ? (
+          <div className="banner warn" style={{ marginTop: 14 }}>
+            <strong>Đang tắt mật khẩu để test.</strong> Không cần đăng nhập.{' '}
+            <Link href="/">Vào bảng điều khiển →</Link>
+          </div>
+        ) : !configured ? (
           <div className="banner bad" style={{ marginTop: 14 }}>
             Máy chủ chưa được cấu hình. Thiếu <span className="mono">APP_PASSWORD</span> hoặc{' '}
             <span className="mono">SESSION_SECRET</span> (tối thiểu 16 ký tự). Ứng dụng sẽ từ chối mọi đăng nhập

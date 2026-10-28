@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { SESSION_COOKIE, verifySessionToken } from './lib/auth';
+import { SESSION_COOKIE, authDisabled, verifySessionToken } from './lib/auth';
 
 // Everything is protected by default; only these paths are reachable
 // unauthenticated. A path is public because it must be (login form, liveness
@@ -8,6 +8,11 @@ const PUBLIC_PATHS = new Set(['/login', '/api/login', '/api/health']);
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Manual-testing mode. Explicitly opt-in via AUTH_DISABLED=1; every screen
+  // then also shows a red banner so an open instance cannot be mistaken for a
+  // protected one.
+  if (authDisabled()) return NextResponse.next();
 
   if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
 

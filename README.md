@@ -2,63 +2,82 @@
 
 A private, single-user control center for every GitHub repository the authenticated account can
 reach: repositories, issues, pull requests, CI, releases, activity, search, notifications,
-exports, an auditable task history, and an honest status for the Arena.ai agent integration.
+exports, an auditable report history, and an honest status page.
 
 Interface language: **Vietnamese**. Visual style: dark developer dashboard.
 
 - Decisions and their evidence: [`docs/DECISION-LOG.md`](docs/DECISION-LOG.md)
-- Arena agent connectivity (Phase Zero): [`docs/ARENA_AGENT_CONNECTIVITY.md`](docs/ARENA_AGENT_CONNECTIVITY.md)
+- Arena agent connectivity: [`docs/ARENA_AGENT_CONNECTIVITY.md`](docs/ARENA_AGENT_CONNECTIVITY.md)
+- Arena host (dev1): [`docs/HOST.md`](docs/HOST.md)
 
 ---
 
 ## Current status — read this first
 
-The specification is large. This repository contains a verified foundation, not a finished
-product. Nothing below is claimed as done unless it was executed.
+Version **0.1.0-dev2**. Compiles, lints, and passes its test suite; screens were exercised
+against the live GitHub API on 2026-10-28. It is a working development build, not a
+production-ready product, and it is **not deployed**.
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Arena host: request/response loop | **VERIFIED** | `docs/HOST.md` §7; multiple requests answered with no intervening chat message |
-| Automatic recovery after turn ends | **BLOCKED** | No supported way to start a turn; see `docs/HOST.md` §7 |
-| Durable queue drained by the real session | **VERIFIED** (superseded by `host/`) | `poc/`, issue [#1](https://github.com/coderunknow/Testing/issues/1) |
-| Next.js + TypeScript foundation | **VERIFIED** | `npm run build` succeeds |
-| Single-user authenticated session | **VERIFIED** | 36 passing tests; unauthenticated `/` → 307, `/api/*` → 401 |
-| Cross-repository overview (repos, issues, PRs, releases, commits) | **VERIFIED** | Rendered live GitHub data for the real account |
-| Integration health page | **VERIFIED** | `/health` reports each component truthfully |
-| Postgres schema | **WRITTEN, NOT EXECUTED** | `db/schema.sql` — no database is provisioned yet |
-| Issues / PR detail views, Projects V2, CI/CD pages, search, webhooks, exports, audit writes | **NOT IMPLEMENTED** | — |
+| Dashboard with real cross-repo counts | **WORKING** | Live run: 33 repositories, exact issue/PR totals via GraphQL; `tests/queries.test.ts` |
+| Repository explorer (search, filter, sort, paging, detail tabs) | **WORKING** | Live HTTP smoke: `/repos`, `/repos/coderunknow/Testing?tab=…` |
+| Issues & pull requests list/detail | **WORKING** | Live pages for issue #1 and PR #63, including checks, reviews, files, commits |
+| CI/CD, releases, commits/activity | **WORKING** | `/actions`, `/releases`, `/activity` |
+| Search, notifications | **WORKING** | `/search` (two scoped queries), `/notifications` |
+| CSV/JSON/Markdown exports | **WORKING** | Formula-injection-safe CSV with BOM; `tests/csv.test.ts`, `tests/api-export.test.ts` |
+| Persistent history + audit log | **CODE VERIFIED, NOT PROVISIONED** | PGlite integration tests (`tests/db.test.ts`, `tests/api-export.test.ts`); no database exists in any environment |
+| Postgres schema | **EXECUTED IN TESTS ONLY** | `db/schema.sql` applied to PGlite in tests; never applied to a real server |
+| Arena host request/response loop (dev1) | **VERIFIED** | `docs/HOST.md` §7; regression tests still pass |
+| Automatic recovery after a turn ends | **BLOCKED** | No supported way to start an Agent Mode turn |
+| Webhooks / near-real-time updates | **NOT IMPLEMENTED** | Deliberately absent — no inbound endpoint, so no signature to verify |
+| Projects V2 board views | **NOT IMPLEMENTED** | — |
 | Production deployment | **NOT DEPLOYED** | Deferred at the user's instruction |
 
 A row marked NOT IMPLEMENTED is a gap, not a hidden failure. There is no placeholder UI that
-pretends those features exist.
+pretends those features exist, and no sample data anywhere in the interface.
 
 ---
 
-## The Arena host (`host/`)
+## Screens
 
-A small service that lets you submit a request in a browser and have the **exact running
-Arena Agent Mode session** answer it, using only Arena's supported tools. No model API, no
-second agent, no browser automation.
+| Route | What it does |
+| --- | --- |
+| `/` | Account overview: repository count, exact open issue/PR totals, attention list, recent commits and releases, each with its fetch scope |
+| `/repos` | Search, filter by visibility/language, sort, paginate; links to `/repos/[owner]/[repo]` |
+| `/repos/[owner]/[repo]` | Repository detail with tabs: overview (commits), issues, pull requests, CI runs, releases |
+| `/issues`, `/issues/[owner]/[repo]/[number]` | Issue list and detail with comments, labels, assignees, milestone |
+| `/pulls`, `/pulls/[owner]/[repo]/[number]` | PR list and detail: review decision, reviewers, reviews, commits, changed files, check-runs |
+| `/actions` | Workflow runs across the most active repositories, with success/failure breakdown |
+| `/releases` | Releases across the most active repositories, drafts and prereleases included |
+| `/activity` | Recent commits across repositories, plus per-repository failure reporting |
+| `/search` | GitHub search over issues, PRs and repositories |
+| `/notifications` | Unread notifications, grouped by reason |
+| `/reports` | Export catalogue and report history |
+| `/health` | Truthful per-component status: token, session, rate limit, database |
+| `/api/health` | Unauthenticated liveness/config probe (no secrets) |
+| `/api/export/[kind]` | CSV / JSON / Markdown download; kinds: `repos`, `issues`, `pulls`, `actions`, `releases`, `search` |
+| `/api/audit` | Recent audit entries; `503` with `available:false` when no database is configured |
 
-```bash
-export APP_PASSWORD=...  SESSION_SECRET=...  AGENT_TOKEN=...
-node host/server.mjs          # http://localhost:4000
-```
+### Data honesty rules
 
-- The agent holds its turn open with `get_process_output(wait_for: "log")` on a
-  `NEW_REQUEST seq=N …` line. **A timeout is not an error** — the agent simply re-arms.
-- State is durable on disk (atomic fsync + rename): pending requests and sequence numbers
-  survive a host restart.
-- Claims enforce ownership, so two workers cannot process one request; expired leases are
-  reclaimed for a replacement worker.
-- Completion is idempotent; a conflicting replay is rejected rather than overwriting history.
+These are enforced in code and covered by tests, not just conventions:
 
-**The limit, stated plainly:** the loop lives only while a turn is open, and Arena exposes no
-supported way to start one. Requests submitted between turns wait until a human sends any
-message. That is a platform limitation and is **not** automation.
+1. **No fabricated totals.** A figure derived from one page of results is labelled as a page.
+   The dashboard uses per-repository GraphQL counters (`issues(states: OPEN)`,
+   `pullRequests(states: OPEN)`) rather than GitHub's `open_issues_count`, which silently
+   includes pull requests.
+2. **No unscoped search.** A search without a `repo:` qualifier is scoped to the signed-in
+   account with `involves:<login>`; without a scope it refuses to run rather than reporting
+   GitHub-wide numbers as if they were yours.
+3. **URLs come from the payload.** GraphQL only exposes the *API* URL for issues and PRs, so
+   the web URL is built from `resourcePath`. Tests assert no `api.github.com` link is rendered.
+4. **Missing permission ≠ no data.** A 403 on notifications or check-runs renders a permission
+   notice, not an empty list.
+5. **Missing database ≠ empty history.** Without `DATABASE_URL`, the UI says the feature is off
+   and exports report `x-export-recording: skipped:no-database`.
 
-Full detail — architecture, lifecycle, recovery procedure, security, troubleshooting, and the
-verified evidence table — is in [`docs/HOST.md`](docs/HOST.md).
+---
 
 ## Architecture
 
@@ -66,30 +85,32 @@ verified evidence table — is in [`docs/HOST.md`](docs/HOST.md).
 Browser ──(signed HttpOnly cookie)──► Next.js (App Router, server components)
                                         │
                                         ├─► GitHub GraphQL/REST  (source of truth)
-                                        └─► Postgres              (cache, history, audit)
+                                        └─► Postgres             (report history, audit)
 ```
 
-**Why GraphQL for the overview.** A cross-repository summary costs one request instead of one
-per repository, which matters against GitHub's rate limits.
+Every screen is a server component. There is no client-side data fetching, so no GitHub token
+and no GitHub response ever reaches the browser bundle; only rendered HTML does.
 
-**GitHub is the source of truth.** Anything cached locally carries `fetched_at` so the UI can
-state freshness instead of implying the cache is live.
-
-**The Arena request ledger has no `delivered` or `running` state on purpose.** Arena exposes no
-supported inbound trigger, so those states could not be reached honestly. The schema makes the
-dishonest claims unrepresentable rather than merely discouraged.
+**GraphQL where it is accurate, REST where it is necessary.** Detail pages need `reviewDecision`,
+review threads, changed files and commit lists, which REST does not provide in one call; search
+and check-runs are REST-only. Each layer states what it could not fetch.
 
 ### Layout
 
 | Path | Purpose |
 | --- | --- |
-| `app/` | Routes: overview, `/health`, `/login`, auth API |
-| `components/Shell.tsx` | Shared chrome and navigation |
+| `app/` | Route tree (screens and API routes) |
+| `components/` | `Shell`, shared UI primitives, error notices |
+| `lib/github.ts` | Transport: classified errors, retries-free timeouts, pagination, secret scrubbing |
+| `lib/queries.ts` | Typed query layer returning `PageInfo { count, truncated, scope, fetchedAt }` |
+| `lib/exports.ts` | Export datasets with column whitelists |
+| `lib/csv.ts` | CSV escaping (formula-injection safe), JSON/Markdown reports |
+| `lib/db/` | Store interface, Postgres implementation, unavailable store, history reads |
 | `lib/auth.ts` | Single-user session: HMAC-SHA256 signed cookie, constant-time checks |
-| `lib/github.ts` | GitHub client (GraphQL overview, REST rate limit) |
-| `db/schema.sql` | Idempotent Postgres schema |
-| `middleware.ts` | Deny-by-default route protection |
-| `tests/` | Vitest suite |
+| `lib/http.ts` | Proxy-aware origin and Secure-cookie detection |
+| `db/schema.sql`, `db/migrate.mjs` | Idempotent Postgres schema and its applier |
+| `host/` | dev1 Arena host — unchanged, still covered by its regression tests |
+| `tests/` | Vitest suite (150 tests) |
 | `poc/` | Arena queue proof of concept — **not** part of the app |
 
 ---
@@ -110,11 +131,21 @@ openssl rand -base64 48   # SESSION_SECRET
 ```
 
 `GITHUB_TOKEN` is a GitHub App installation token or a fine-grained PAT with read access to
-repository metadata, contents, issues, pull requests, actions, and projects. Use the narrowest
-scopes that cover the features you enable.
+repository metadata, contents, issues, pull requests, actions, and — for the notifications
+screen — notifications. Use the narrowest scopes that cover the features you enable.
 
 **Never paste the token into this chat, a commit, a query string, or a report.** It belongs in
 the server environment only.
+
+### Database (optional)
+
+```bash
+export DATABASE_URL=postgres://…
+npm run db:migrate        # applies db/schema.sql, idempotent
+```
+
+Without `DATABASE_URL` every GitHub screen still works; only report history and the audit log
+are disabled, and the UI says so.
 
 ### Sandbox note
 
@@ -136,64 +167,90 @@ A normal deployment does not need this.
   `/api/health` are public, each because it must be.
 - **Fail closed.** Without `APP_PASSWORD` and a `SESSION_SECRET` of at least 16 characters, every
   login is refused. An unconfigured app never becomes an open app.
-- **Session cookie.** HttpOnly, SameSite=Lax, `Secure` in production, 12-hour lifetime, signed
-  with HMAC-SHA256. Tampering, expiry, and wrong-secret signatures are covered by tests.
-- **Secrets stay server-side.** No token is referenced in any client component; the health
-  endpoint reports whether configuration exists, never what it is.
-- **No secrets in history.** `poc/` is the only code that takes a token, and it reads from the
-  environment only.
-- **Untrusted content.** Repository names, issue titles, PR titles and commit messages come from
-  GitHub and are rendered as text through React's escaping. No `dangerouslySetInnerHTML` is used.
+- **Session cookie.** HttpOnly, SameSite=Lax, 12-hour lifetime, signed with HMAC-SHA256.
+  `Secure` is derived from the request (`x-forwarded-proto`), so it is set behind an HTTPS proxy
+  and not set over plain HTTP, where the browser would silently drop it.
+- **Secrets stay server-side.** `tests/security.test.ts` fails the build if a file that reads
+  `GITHUB_TOKEN` is also marked `'use client'`, logs the token, or places it in a URL.
+- **Upstream text is scrubbed.** Error messages from GitHub are passed through `scrubSecrets`,
+  which redacts `gh*_` / `github_pat_` tokens and `Bearer` values before anything is rendered.
+- **Untrusted content.** Titles, bodies and commit messages are rendered as text through React's
+  escaping. No `dangerouslySetInnerHTML`; a test enforces the absence.
+- **CSV injection.** Cells beginning with `= + - @ \t \r` are prefixed with `'` before export.
+- **Read-only.** No code path issues a mutating GitHub request; a test asserts no REST
+  `POST/PATCH/PUT/DELETE` exists outside the transport module.
 - **Limitation.** Sessions are stateless, so logout clears the cookie but cannot revoke an
-  already-issued token; with a 12-hour TTL the exposure window is bounded. A server-side session
-  table is the upgrade path.
+  already-issued token; with a 12-hour TTL the exposure window is bounded.
+- **Manual-testing mode (`AUTH_DISABLED=1`).** Removes the login requirement so a temporary
+  host can be exercised without credentials. It is explicit, never inferred, reported by
+  `/api/health` as `auth_disabled: true`, and announced by a red banner on every screen.
+  `tests/middleware.test.ts` asserts that the default stays deny-by-default and that only the
+  exact value `1` enables it. Do not set it on a deployment that matters.
 
 ---
 
 ## Costs
 
-- GitHub REST/GraphQL calls are free within the account's rate limits; the health page shows the
-  remaining allowance.
+- GitHub REST/GraphQL calls are free within the account's rate limits; `/health` shows the
+  remaining allowance for REST, GraphQL and Search separately.
 - No model API is used, so there is no per-request inference cost.
-- Hosting is intended for Vercel **Hobby** (free). Hobby has commercial-use restrictions, a
-  monthly bandwidth cap, and serves deployments under SSO protection unless a custom domain is
-  attached — relevant for how the app is reached.
-- Postgres is intended for Supabase free tier. Free projects pause after inactivity; a paused
-  project must be restored before the app can use it.
+- Hosting is intended for Vercel **Hobby** (free). Hobby has commercial-use restrictions and a
+  monthly bandwidth cap.
+- Postgres is intended for Supabase free tier. Free projects pause after inactivity.
 - **No paid resource, plan upgrade, or domain has been purchased.**
 
 ---
+
+## Automation
+
+Two workflows live in `.github/workflows/`:
+
+| Workflow | Trigger | Does |
+| --- | --- | --- |
+| `CI` | every pull request, every push to `main` | typecheck, tests, production build |
+| `Nightly` | `cron '0 18 * * *'` (01:00 Asia/Bangkok) and manual dispatch | verifies `main`, reports outdated/vulnerable dependencies, then prepares an in-range dependency update as a pull request |
+
+**What the nightly job will not do:** it never commits to `main`, never force-pushes, never merges
+its own PR and never enables auto-merge. `npm update` only moves within the semver ranges already
+declared in `package.json` — a major upgrade stays a human decision. The full gate set runs on the
+update branch *before* the PR is opened, because a PR created with the default `GITHUB_TOKEN` does
+not trigger further workflows and therefore shows no check run.
+
+`tests/workflows.test.ts` reads the workflow files and fails if any of those guarantees is broken.
 
 ## Operations
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # vitest
+npm test            # vitest (150 tests, includes PGlite integration)
 npm run build       # production build
 npm start           # serve the production build on :3100
+npm run db:migrate  # apply db/schema.sql (requires DATABASE_URL)
 ```
 
 Smoke test after any deploy:
 
 ```bash
-curl -s https://<host>/api/health   # expect 200 and arena_direct_connectivity: "blocked"
-curl -s -o /dev/null -w '%{http_code}\n' https://<host>/   # expect 307 to /login
+curl -s https://<host>/api/health                      # 200; reports config presence only
+curl -s -o /dev/null -w '%{http_code}\n' https://<host>/   # 307 to /login
 ```
-
-### Database
-
-`db/schema.sql` is idempotent and safe to re-run. Apply it with `psql "$DATABASE_URL" -f db/schema.sql`
-or paste it into the Supabase SQL editor. Default retention keeps everything until deleted;
-`app_settings.retention` is where a policy would be set once retention jobs exist.
 
 ---
 
 ## Known limitations
 
 1. **Arena agent integration is blocked** — see `docs/ARENA_AGENT_CONNECTIVITY.md`.
-2. **No database provisioned**, so history, notifications, and audit logging are off. The app
-   degrades honestly: it says so on `/health` rather than failing.
+2. **No database is provisioned in any environment.** Schema and store are exercised against
+   PGlite in tests; a real Postgres server has never been contacted.
 3. **Not deployed.** No production URL exists and none will be invented.
-4. **CI/CD, Projects V2, search, webhooks, and exports are not implemented yet.**
-5. **No caching layer**, so the overview calls GitHub on every load. Fine for a single user;
-   the schema exists to add caching without redesign.
+4. **No webhooks, and therefore no near-real-time updates.** Every screen is a fresh read of
+   GitHub at request time. Webhook signature verification, idempotency keys and replay
+   protection are designed in `db/schema.sql` but unimplemented, so nothing here claims
+   real-time behaviour.
+5. **Projects V2 board views are not implemented** — project items are not fetched.
+6. **Search cannot cover "all repositories I can reach".** GitHub search requires a repo or an
+   owner/user qualifier; the app therefore scopes to one repository or to issues/PRs involving
+   the signed-in account, and says which.
+7. **Notifications are the unread page-1 snapshot** (max 50), not a synchronized inbox.
+8. **No caching layer**, so each page load calls GitHub. Fine for a single user.
+9. **Comment lists are capped** (30 on issues) and the UI states the real total when capped.

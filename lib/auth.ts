@@ -55,6 +55,19 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/**
+ * Escape hatch for local manual testing only.
+ *
+ * The default posture is unchanged: without a valid session cookie, every route
+ * except the public three is refused. Setting AUTH_DISABLED=1 turns the login
+ * requirement off explicitly, which is only defensible on a throwaway test host
+ * where the operator knows the URL is public. It is never inferred, and an
+ * absent or different value leaves authentication fully enforced.
+ */
+export function authDisabled(): boolean {
+  return process.env.AUTH_DISABLED === '1';
+}
+
 export function authConfigured(): boolean {
   return Boolean(process.env.APP_PASSWORD && process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 16);
 }

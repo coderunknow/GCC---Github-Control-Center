@@ -20,6 +20,13 @@ const LEASE_TTL_MS = Number(process.env.LEASE_TTL_MS ?? 5 * 60 * 1000);
 let config;
 try {
   config = loadConfig();
+  // Manual-testing escape hatch, mirroring the Next.js app's AUTH_DISABLED.
+  // Only the exact string "1" enables it; anything else leaves the host
+  // fail-closed.
+  config.authDisabled = process.env.AUTH_DISABLED === '1';
+  if (config.authDisabled) {
+    console.warn('CẢNH BÁO: AUTH_DISABLED=1 — host này không yêu cầu đăng nhập. Chỉ dùng để test.');
+  }
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));
   console.error('\nKhông khởi động host khi chưa có đủ thông tin xác thực.');

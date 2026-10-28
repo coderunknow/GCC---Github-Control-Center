@@ -1,31 +1,49 @@
 import { NextResponse } from 'next/server';
-import { SESSION_COOKIE, SESSION_MAX_AGE, createSessionToken, passwordMatches } from '@/lib/auth';
+import { SESSION_COOKIE, SESSION_MAX_AGE, authDisabled, createSessionToken, passwordMatches } from '@/lib/auth';
+import { absoluteUrl, isSecureRequest } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
-  const form = await request.formData();
+  const contentType = request.headers.get('content-type') ?? '(none)';
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    // A body that cannot be parsed is a client error, never a 500.
+    console.warn('[login] unparseable form body', { contentType });
+    return NextResponse.json({ error: 'invalid form body' }, { status: 400 });
+  }
+
   const password = String(form.get('password') ?? '');
   const nextRaw = String(form.get('next') ?? '/');
   const next = nextRaw.startsWith('/') && !nextRaw.startsWith('//') ? nextRaw : '/';
 
-  const origin = new URL(request.url).origin;
+  if (authDisabled()) {
+    // Manual-testing mode: no credential is checked and none is required.
+    return NextResponse.redirect(absoluteUrl(request, next), 303);
+  }
 
   if (!password || !passwordMatches(password)) {
-    return NextResponse.redirect(new URL(`/login?error=1&next=${encodeURIComponent(next)}`, origin), 303);
+    return NextResponse.redirect(
+      absoluteUrl(request, `/login?error=1&next=${encodeURIComponent(next)}`),
+      303,
+    );
   }
 
   const token = await createSessionToken();
   if (!token) {
     // Configuration is incomplete; fail closed rather than issuing a cookie.
-    return NextResponse.redirect(new URL('/login?error=1', origin), 303);
+    return NextResponse.redirect(absoluteUrl(request, '/login?error=1'), 303);
   }
 
-  const response = NextResponse.redirect(new URL(next, origin), 303);
+  const response = NextResponse.redirect(absoluteUrl(request, next), 303);
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    // Derived from the actual request: Secure over HTTPS, not over plain HTTP,
+    // where the browser would drop the cookie and the login would appear broken.
+    secure: isSecureRequest(request),
     path: '/',
     maxAge: SESSION_MAX_AGE,
   });
