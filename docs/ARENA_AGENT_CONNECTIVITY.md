@@ -73,22 +73,27 @@ the queue is durable and the consumer is the real session — the *trigger* is h
 
 ## 4. Behaviour when the browser is closed or the agent is idle
 
-**BLOCKED.**
+> **Superseded 2026-10-28.** This section previously concluded that delivery was
+> categorically blocked because no *external* trigger exists. That reasoning was wrong: an
+> external trigger is not required, because **the agent itself can hold its turn open** with
+> a blocking `get_process_output` wait. The verdict below is the corrected one.
 
-| Question | Answer | Evidence |
+**What was corrected.** The original analysis conflated two separate claims:
+
+- *"No external scheduler can start an Agent Mode turn."* — still true, still **VERIFIED**.
+- *"Therefore the agent cannot receive requests."* — **false**, and now disproven by
+  execution.
+
+| Question | Corrected answer | Status |
 | --- | --- | --- |
-| Can a request be delivered while the agent is idle? | No | A turn begins with a user message and ends with the agent's reply. Arena's own copy: "When the task is complete, provide your feedback to continue or choose 'keep working.'" |
-| While the browser is closed? | Only if a turn is already running. No new turn can start | Same; the sandbox lives inside a turn |
-| Is there asynchronous or durable execution across turns? | No documented mechanism | No scheduler, cron, webhook, or queue-consumer trigger exists in any Arena documentation |
-| Is there a documented inbound integration? | No | Help Center contains no developer/API section |
+| Can a request reach the session while a turn is open? | Yes — the agent blocks on `get_process_output` and a submission releases the wait | **VERIFIED** (multiple requests, no intervening chat message) |
+| Can it receive requests while the *agent* is idle? | Yes, but they wait: the host stores them and the worker answers on its next activation | **VERIFIED** |
+| Can a new turn start from an external event? | No supported mechanism exists | **BLOCKED** |
+| Does the loop survive the turn ending? | No | **VERIFIED** (nothing blocks; latency measured at 264s) |
 
-The precise missing capability: **Arena exposes no supported way to start an Agent Mode turn
-from an external event.** Everything downstream of that — durable queue, connectors,
-persistence, identity, result retrieval — is feasible and was demonstrated.
-
-This is a platform limitation, not an implementation defect, and it cannot be worked around
-without violating the requirement (browser automation, credential reuse, or a substitute
-model).
+An external trigger is unnecessary for the working design; what is missing is only the
+ability to **start** a turn without a human. Those are different gaps and must not be
+merged into one claim.
 
 ---
 
@@ -101,12 +106,10 @@ model).
 | Scraping or automating Arena's chat interface | **No** |
 | Circumventing access controls | **No** |
 | Substituting another model or agent | **No** |
-| Claiming delivery without evidence | **No** — every claim above cites a check |
+| Claiming delivery without evidence | **No** — every claim cites an executed check |
 
-Arena's Terms of Use §5 additionally prohibits programmatic access to the service
-("(vi) access the Services through programmatic or automated means…") and scraping, with an
-exception only for public search engines. The queue design deliberately touches only GitHub,
-so it does not invoke that clause.
+The host touches only its own local state and GitHub; it does not invoke Arena endpoints, so
+the Terms of Use §5 restriction on programmatic access is not engaged by this design.
 
 ---
 
@@ -117,27 +120,36 @@ so it does not invoke that clause.
 | Session longevity | Long-running thread, "sometimes over hundreds of turns" | **VERIFIED** (Help Center) |
 | Context growth | Conversation compaction is built in for Agent Mode | **VERIFIED** |
 | Token limit | Reaching it ends the session; continuation requires a **new** session, with no context transfer | **VERIFIED** |
-| Orchestrator model stability | Arena may switch the orchestrator mid-session for reliability | **VERIFIED** — therefore "the exact agent" is guaranteed only as the same **thread**, not the same model |
+| Orchestrator model stability | Arena may switch the orchestrator mid-session for reliability | **VERIFIED** — "the exact agent" is guaranteed only as the same **thread** |
+| Per-call wait ceiling | 180 s per `get_process_output` call | **VERIFIED** (tool contract, exercised) |
 | Daily usage limit | Applies to all users; resets after 24 hours | **VERIFIED** |
 
 ---
 
 ## 7. Conclusion and required application behaviour
 
-Direct, unattended delivery to this session is **BLOCKED**. Per §1.4 and §7 of the
-specification, the application must therefore:
+**What now works:** a human can submit requests in a browser and the exact running session
+answers them through a supported blocking wait, with durable state, enforced ownership,
+idempotent completion, and no substitution of the model.
 
-1. **Not** present a chat interface that appears to deliver requests to the agent.
-2. **Not** expose an endpoint that stores a message and implies it was forwarded.
-3. Show the Arena agent workspace as **BLOCKED**, with the exact missing capability named.
-4. Optionally offer an explicitly labelled **manual handoff** — prepared request text the user
-   copies into this session themselves. This must be described as manual, never as delivery.
-5. Never route requests to a substitute agent.
+**What remains BLOCKED:** automatic reactivation after the turn ends. The only supported
+recovery is a human starting a turn, after which the persisted backlog is drained. This is
+documented as a known limitation of the prerelease and is **not** claimed as automation.
 
-The durable ledger may still be implemented — it is genuinely useful for capturing intent,
-status, and history — but a ledger row is **not** evidence that an agent task is running, and
-the UI must say so.
+The application therefore must, and now does:
 
-**Recommendation.** Treat direct connectivity as a platform gap and re-test if Arena ships an
-inbound trigger or session API. Meanwhile, the queue from `poc/` is the closest verified
-mechanism and remains honestly labelled "human-activated".
+1. Present the host as a working console rather than a "blocked" placeholder.
+2. Report worker health honestly, including `recover_required`.
+3. Never route requests to a substitute agent or fabricate responses.
+4. Document the manual recovery step and why it is required.
+
+See `docs/HOST.md` for the architecture, lifecycle, security, and operational procedure.
+
+---
+
+## 8. Revision history
+
+| Date | Change | Reason |
+| --- | --- | --- |
+| 2026-10-28 | Created | Initial Phase Zero investigation |
+| 2026-10-28 | §4 and §7 rewritten; §5–§8 renumbered | The original "categorically blocked" verdict was wrong. An agent-held blocking wait removes the need for an external trigger. Corrected by execution evidence, not by re-reading documentation. |

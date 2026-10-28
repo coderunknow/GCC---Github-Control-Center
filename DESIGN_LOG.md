@@ -54,3 +54,43 @@ unauthenticated, so a misconfigured deployment is locked rather than open.
 
 **Sandbox TLS.** Node's bundled CA store rejects the sandbox's TLS interception; `curl` accepts
 it. Use `NODE_EXTRA_CA_CERTS`, never `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+
+### 2026-10-28 — v0.1.0-dev1: turn recovery investigation and host hardening
+
+**User Intent (this increment).** Restore request processing after the Agent Mode worker
+stops, harden the prototype, and ship a professional development prerelease. Automatic
+post-termination recovery is the stated goal; the user explicitly required that it not be
+faked if the platform does not support it.
+
+**Implementation History.**
+
+1. Re-verified the corrected mechanism: the agent itself holds the turn open via
+   `get_process_output(wait_for: "log")`. An *external* trigger is unnecessary; the earlier
+   "categorically blocked" verdict was withdrawn as wrong.
+2. Rewrote the host: durable atomic store, claim leases, idempotent completion, recovery
+   checkpoint, computed worker health, STOP control, separated human/worker credentials,
+   fail-closed startup, CSRF and throttling.
+3. Added 25 host integration tests over real HTTP; suite is now 36 tests.
+4. Corrected `docs/ARENA_AGENT_CONNECTIVITY.md`, added `docs/HOST.md`, bumped to
+   `0.1.0-dev1`, added `CHANGELOG.md` and a CI workflow.
+
+**Decisions & Lessons.**
+
+- **The blocking wait is the whole mechanism.** The previous analysis searched for a way to
+  *start* a turn and concluded nothing worked. The mistake was assuming requests must be
+  pushed in from outside; they can instead be pulled by an agent that is already running and
+  simply does not end its turn.
+- **Chose write→fsync→atomic-rename over `node:sqlite`.** `node:sqlite` is available in Node
+  22 but emits an experimental-API warning; a document store is stable, dependency-free, and
+  auditable at this volume.
+- **Ownership had to be enforced, not documented.** `answer` now requires holding the claim;
+  without that, "one worker per request" was only a convention.
+- **Two defects were found by running the thing, not by reading it:** malformed JSON returned
+  `500` instead of `400`, and `/api/worker/state` was registered twice so the human-only copy
+  shadowed the worker copy and returned `401` to a valid worker. Both now have regression
+  tests. Neither was visible in a build or a typecheck.
+- **A test failed for a good reason.** A 2-character prompt was rejected by a 3-character
+  minimum — the API was right and the fixture was wrong. Fixed the fixture, not the rule.
+- **Host survival ≠ worker survival.** Demonstrated directly: the v1 host kept serving five
+  requests across a turn boundary while the worker was absent. These must never be described
+  with one word.

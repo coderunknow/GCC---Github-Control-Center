@@ -9,3 +9,4 @@ npm-debug.log*
 .DS_Store
 coverage/
 google_drive/
+host/data/

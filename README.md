@@ -18,10 +18,11 @@ product. Nothing below is claimed as done unless it was executed.
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Arena direct-session integration | **BLOCKED** | `docs/ARENA_AGENT_CONNECTIVITY.md`; no supported inbound trigger exists |
-| Durable queue drained by the real session | **VERIFIED** (investigation artefact only) | `poc/`, issue [#1](https://github.com/coderunknow/Testing/issues/1) |
+| Arena host: request/response loop | **VERIFIED** | `docs/HOST.md` §7; multiple requests answered with no intervening chat message |
+| Automatic recovery after turn ends | **BLOCKED** | No supported way to start a turn; see `docs/HOST.md` §7 |
+| Durable queue drained by the real session | **VERIFIED** (superseded by `host/`) | `poc/`, issue [#1](https://github.com/coderunknow/Testing/issues/1) |
 | Next.js + TypeScript foundation | **VERIFIED** | `npm run build` succeeds |
-| Single-user authenticated session | **VERIFIED** | 11 passing tests; unauthenticated `/` → 307, `/api/*` → 401 |
+| Single-user authenticated session | **VERIFIED** | 36 passing tests; unauthenticated `/` → 307, `/api/*` → 401 |
 | Cross-repository overview (repos, issues, PRs, releases, commits) | **VERIFIED** | Rendered live GitHub data for the real account |
 | Integration health page | **VERIFIED** | `/health` reports each component truthfully |
 | Postgres schema | **WRITTEN, NOT EXECUTED** | `db/schema.sql` — no database is provisioned yet |
@@ -32,6 +33,32 @@ A row marked NOT IMPLEMENTED is a gap, not a hidden failure. There is no placeho
 pretends those features exist.
 
 ---
+
+## The Arena host (`host/`)
+
+A small service that lets you submit a request in a browser and have the **exact running
+Arena Agent Mode session** answer it, using only Arena's supported tools. No model API, no
+second agent, no browser automation.
+
+```bash
+export APP_PASSWORD=...  SESSION_SECRET=...  AGENT_TOKEN=...
+node host/server.mjs          # http://localhost:4000
+```
+
+- The agent holds its turn open with `get_process_output(wait_for: "log")` on a
+  `NEW_REQUEST seq=N …` line. **A timeout is not an error** — the agent simply re-arms.
+- State is durable on disk (atomic fsync + rename): pending requests and sequence numbers
+  survive a host restart.
+- Claims enforce ownership, so two workers cannot process one request; expired leases are
+  reclaimed for a replacement worker.
+- Completion is idempotent; a conflicting replay is rejected rather than overwriting history.
+
+**The limit, stated plainly:** the loop lives only while a turn is open, and Arena exposes no
+supported way to start one. Requests submitted between turns wait until a human sends any
+message. That is a platform limitation and is **not** automation.
+
+Full detail — architecture, lifecycle, recovery procedure, security, troubleshooting, and the
+verified evidence table — is in [`docs/HOST.md`](docs/HOST.md).
 
 ## Architecture
 
