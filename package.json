@@ -13,7 +13,7 @@
     "db:migrate": "node db/migrate.mjs"
   },
   "dependencies": {
-    "next": "^15.5.28",
+    "next": "^15.5.29",
     "postgres": "3.4.7",
     "react": "19.1.1",
     "react-dom": "19.1.1"
